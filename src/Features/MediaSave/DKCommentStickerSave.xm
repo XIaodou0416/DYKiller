@@ -86,8 +86,9 @@ static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
 %new
 - (void)dk_saveCommentSticker:(id)sender {
     DKMediaSaveHit(DKMediaSaveEntryStickerCell);
+    UICollectionViewCell *cell = (UICollectionViewCell *)self;
     NSString *modelSource = @"unresolved";
-    id comment = DKCommentForCell(self, &modelSource);
+    id comment = DKCommentForCell(cell, &modelSource);
     NSDictionary *resolvedComment = comment ? DKResolveComment(comment) : nil;
     DKMediaSaveItem *item = resolvedComment ? DKSelectCommentSticker(resolvedComment) : nil;
     NSArray *stickerURLs = resolvedComment[@"sticker"][@"animate"][@"urls"]
@@ -106,10 +107,10 @@ static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
                      item ? @"resolved" : @"nil"]);
     if (!comment || !item) {
         UICollectionView *list = nil;
-        for (UIView *view = self.superview; view; view = view.superview) {
+        for (UIView *view = cell.superview; view; view = view.superview) {
             if ([view isKindOfClass:UICollectionView.class]) { list = (UICollectionView *)view; break; }
         }
-        NSIndexPath *path = [list indexPathForCell:self];
+        NSIndexPath *path = [list indexPathForCell:cell];
         UIViewController *controller = DKMediaControllerForResponder(self, kDKCommentListController);
         DKMediaSaveNote([NSString stringWithFormat:@"评论表情上下文 cell=%@ list=%@ controller=%@ index=%@",
                          NSStringFromClass([self class]),
