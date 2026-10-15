@@ -84,8 +84,8 @@ static id DKCommentForCell(UICollectionViewCell *cell) {
     id comment = DKCommentForCell(self);
     DKMediaSaveItem *item = comment ? DKSelectCommentSticker(DKResolveComment(comment)) : nil;
     if (!comment || !item) {
-        DKMediaSaveNote([NSString stringWithFormat:@"评论表情解析失败 cell=%@ comment=%@",
-                         NSStringFromClass(self.class), comment ? NSStringFromClass([comment class]) : @"nil"]);
+        DKMediaSaveNote([NSString stringWithFormat:@"评论表情解析失败 comment=%@",
+                         comment ? NSStringFromClass([comment class]) : @"nil"]);
     }
     DKMediaSaveRun(item ? @[item] : @[], @"评论表情长按");
 }
