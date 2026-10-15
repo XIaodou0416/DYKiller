@@ -2,18 +2,6 @@
 #import "DKMediaResolver.h"
 #import "DKMediaSelect.h"
 
-id DKMediaValue(id object, NSString *key) {
-    if (!object || !key.length) return nil;
-    @try {
-        id value = [object isKindOfClass:NSDictionary.class]
-            ? object[key]
-            : [object valueForKey:key];
-        return value == NSNull.null ? nil : value;
-    } @catch (__unused NSException *exception) {
-        return nil;
-    }
-}
-
 static BOOL DKExpectStickerURL(NSDictionary *comment, NSString *expectedURL) {
     NSDictionary *resolved = DKResolveComment(comment);
     DKMediaSaveItem *item = DKSelectCommentSticker(resolved);
