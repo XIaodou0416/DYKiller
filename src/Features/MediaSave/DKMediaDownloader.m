@@ -1,5 +1,13 @@
 #import "DKMediaDownloader.h"
 #import "DKMediaFormat.h"
+#import "DKMediaSaveDiagnostics.h"
+
+static NSString *DKMediaSafeURLSummary(NSURL *url) {
+    if (!url) return @"invalid-url";
+    NSString *host = url.host.length ? url.host : @"no-host";
+    NSString *ext = url.pathExtension.length ? url.pathExtension.lowercaseString : @"none";
+    return [NSString stringWithFormat:@"%@ ext=%@ query=%@", host, ext, url.query.length ? @"yes" : @"no"];
+}
 
 @interface DKMediaDownloader ()
 @property (nonatomic, strong) NSURL *directory;
@@ -55,6 +63,9 @@
     }
     NSString *urlString = candidate.urls[ui];
     NSURL *url = [NSURL URLWithString:urlString];
+    NSString *urlSummary = DKMediaSafeURLSummary(url);
+    DKMediaSaveNote([NSString stringWithFormat:@"下载尝试 candidate=%@ url=%lu/%lu %@",
+                     candidate.tag ?: @"", (unsigned long)(ui + 1), (unsigned long)candidate.urls.count, urlSummary]);
     void (^next)(NSString *) = ^(NSString *error) {
         [self attempt:candidates candidate:ci url:ui + 1 accept:accept validate:validate lastError:error completion:completion];
     };
@@ -77,9 +88,11 @@
             if (self.cancelled) { completion(nil, nil, nil, @"已取消"); return; }
             NSString *reason = failure;
             NSURL *file = destination;
+            NSNumber *fileSize = @0;
             if (!reason) {
                 NSNumber *size = nil;
                 [file getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
+                fileSize = size ?: @0;
                 // 文件名补上按文件头判定的扩展名，AVFoundation 与相册才能识别容器。
                 NSString *extension = size.longLongValue > 0 ? DKMediaFileExtension(file) : nil;
                 NSURL *named = extension ? [file URLByAppendingPathExtension:extension] : nil;
@@ -87,10 +100,12 @@
                 reason = size.longLongValue > 0 ? (validate ? validate(file) : nil) : @"文件为空";
             }
             if (reason) {
+                DKMediaSaveNote([NSString stringWithFormat:@"下载失败 %@ reason=%@", urlSummary, reason]);
                 [NSFileManager.defaultManager removeItemAtURL:file error:nil];
                 next(reason);
                 return;
             }
+            DKMediaSaveNote([NSString stringWithFormat:@"下载成功 %@ bytes=%@", urlSummary, fileSize]);
             completion(file, candidate, urlString, nil);
         });
     }];

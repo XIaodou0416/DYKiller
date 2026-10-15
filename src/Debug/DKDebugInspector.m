@@ -14,6 +14,7 @@
 #import "DKAudioProbe.h"
 #import "DKAudioRuntime.h"
 #import "DKTabBarProbe.h"
+#import "DKMediaSaveDiagnostics.h"
 
 @interface DKDebugOverlayView : UIView
 @end
@@ -23,6 +24,103 @@
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = [super hitTest:point withEvent:event];
     return (hit == self) ? nil : hit;
+}
+
+@end
+
+@interface DKMediaSaveLogViewController : UIViewController
+@property (nonatomic, strong) UITextView *logView;
+@property (nonatomic, strong) NSTimer *refreshTimer;
+- (void)refreshLog;
+- (void)copyLog;
+- (void)closeLog;
+@end
+
+@implementation DKMediaSaveLogViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
+    self.preferredContentSize = CGSizeMake(520, 680);
+
+    UILabel *title = [UILabel new];
+    title.text = @"媒体保存实时日志";
+    title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+
+    UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [copyButton setTitle:@"复制日志" forState:UIControlStateNormal];
+    [copyButton addTarget:self action:@selector(copyLog) forControlEvents:UIControlEventTouchUpInside];
+
+    UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [closeButton setTitle:@"完成" forState:UIControlStateNormal];
+    [closeButton addTarget:self action:@selector(closeLog) forControlEvents:UIControlEventTouchUpInside];
+
+    UIStackView *actions = [[UIStackView alloc] initWithArrangedSubviews:@[title, copyButton, closeButton]];
+    actions.axis = UILayoutConstraintAxisHorizontal;
+    actions.alignment = UIStackViewAlignmentCenter;
+    actions.distribution = UIStackViewDistributionEqualSpacing;
+
+    self.logView = [UITextView new];
+    self.logView.editable = NO;
+    self.logView.selectable = YES;
+    self.logView.alwaysBounceVertical = YES;
+    self.logView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    self.logView.textColor = UIColor.labelColor;
+    self.logView.backgroundColor = [UIColor.secondarySystemBackgroundColor colorWithAlphaComponent:0.9];
+    self.logView.layer.cornerRadius = 10;
+    self.logView.textContainerInset = UIEdgeInsetsMake(10, 8, 10, 8);
+
+    actions.translatesAutoresizingMaskIntoConstraints = NO;
+    self.logView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:actions];
+    [self.view addSubview:self.logView];
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [actions.topAnchor constraintEqualToAnchor:safe.topAnchor constant:10],
+        [actions.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
+        [actions.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
+        [actions.heightAnchor constraintEqualToConstant:38],
+        [self.logView.topAnchor constraintEqualToAnchor:actions.bottomAnchor constant:8],
+        [self.logView.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:10],
+        [self.logView.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-10],
+        [self.logView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-10]
+    ]];
+    [self refreshLog];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    __weak typeof(self) weakSelf = self;
+    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.8 repeats:YES block:^(__unused NSTimer *timer) {
+        [weakSelf refreshLog];
+    }];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self.refreshTimer invalidate];
+    self.refreshTimer = nil;
+}
+
+- (void)refreshLog {
+    NSString *text = DKMediaSaveDiagnostics() ?: @"暂无媒体保存日志";
+    if ([self.logView.text isEqualToString:text]) return;
+    self.logView.text = text;
+    if (text.length) [self.logView scrollRangeToVisible:NSMakeRange(text.length - 1, 1)];
+}
+
+- (void)copyLog {
+    [self refreshLog];
+    UIPasteboard.generalPasteboard.string = self.logView.text ?: @"";
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"日志已复制"
+                                                                   message:@"请把剪贴板中的文本发回给开发者。"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)closeLog {
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 @end
@@ -37,6 +135,7 @@
 - (void)exportWholePage;
 - (void)showAudioStateMenu;
 - (void)startAudioExportWithDeclaredState:(NSString *)declaredState;
+- (void)showMediaSaveLog;
 @end
 
 @implementation DKDebugOverlayWindow
@@ -317,12 +416,23 @@ static void DKEnsureDebugWindow(void) {
                                             handler:^(__unused UIAlertAction *action) {
         [self showAudioStateMenu];
     }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"媒体保存实时日志"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        [self showMediaSaveLog];
+    }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     if (alert.popoverPresentationController) {
         alert.popoverPresentationController.sourceView = self.wrenchButton;
         alert.popoverPresentationController.sourceRect = self.wrenchButton.bounds;
     }
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)showMediaSaveLog {
+    DKMediaSaveLogViewController *logController = [DKMediaSaveLogViewController new];
+    logController.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:logController animated:YES completion:nil];
 }
 
 - (void)exportWholePage {
