@@ -10,7 +10,6 @@
 #import "DKMediaSelect.h"
 
 static NSString *const kDKCommentCellClass = @"AWECommentPanelListSwiftImpl.CommentNewCell";
-static NSString *const kDKCommentListController = @"AWECommentPanelListSwiftImpl.CommentViewController";
 
 @interface DKCommentNewCell : UICollectionViewCell
 @end
@@ -37,8 +36,27 @@ static id DKUnwrapCommentModel(id value, NSUInteger depth) {
     return nil;
 }
 
-// 优先从可见 cell 自身取模型；搜索结果详情的 cell / 列表 viewModel 包装与首页评论列表不完全相同。
-static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
+static NSArray *DKCommentSectionsFromOwner(id owner) {
+    NSArray *directSections = DKMediaValue(owner, @"sectionViewModelsArray");
+    if ([directSections isKindOfClass:NSArray.class]) return directSections;
+    for (NSString *key in @[@"viewModel", @"commentViewModel", @"listViewModel", @"dataSource"]) {
+        id nestedOwner = DKMediaValue(owner, key);
+        NSArray *sections = DKMediaValue(nestedOwner, @"sectionViewModelsArray");
+        if ([sections isKindOfClass:NSArray.class]) return sections;
+    }
+    return nil;
+}
+
+static NSString *DKResponderClassPath(UIResponder *responder) {
+    NSMutableArray<NSString *> *classes = [NSMutableArray array];
+    for (UIResponder *current = responder; current && classes.count < 12; current = current.nextResponder) {
+        [classes addObject:NSStringFromClass([current class])];
+    }
+    return [classes componentsJoinedByString:@" -> "];
+}
+
+// 优先从可见 cell 自身取模型；列表控制器按 viewModel 结构查找，不依赖首页评论页的具体类名。
+static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource, UIViewController **modelController) {
     id directComment = DKUnwrapCommentModel(cell, 0);
     if (directComment) {
         if (modelSource) *modelSource = @"cell model";
@@ -50,13 +68,31 @@ static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
         if ([view isKindOfClass:UICollectionView.class]) { list = (UICollectionView *)view; break; }
     }
     NSIndexPath *path = [list indexPathForCell:cell];
-    UIViewController *controller = DKMediaControllerForResponder(cell, kDKCommentListController);
-    NSArray *sections = DKMediaValue(DKMediaValue(controller, @"viewModel"), @"sectionViewModelsArray");
+    UIViewController *controller = nil;
+    NSArray *sections = nil;
+    NSString *sectionSource = @"controller";
+    for (UIResponder *responder = cell; responder; responder = responder.nextResponder) {
+        if (![responder isKindOfClass:UIViewController.class]) continue;
+        NSArray *candidate = DKCommentSectionsFromOwner(responder);
+        if (!candidate) continue;
+        controller = (UIViewController *)responder;
+        sections = candidate;
+        break;
+    }
+    if (!sections) {
+        sections = DKCommentSectionsFromOwner(list.dataSource);
+        if (sections) sectionSource = @"collection.dataSource";
+    }
+    if (!sections) {
+        sections = DKCommentSectionsFromOwner(list.delegate);
+        if (sections) sectionSource = @"collection.delegate";
+    }
+    if (modelController) *modelController = controller;
     if (!path || ![sections isKindOfClass:NSArray.class] || (NSUInteger)path.section >= sections.count) return nil;
     NSArray *models = DKMediaValue(sections[path.section], @"modelsArray");
     if (![models isKindOfClass:NSArray.class] || (NSUInteger)path.item >= models.count) return nil;
     id comment = DKUnwrapCommentModel(models[path.item], 0);
-    if (comment && modelSource) *modelSource = @"section modelsArray";
+    if (comment && modelSource) *modelSource = [sectionSource stringByAppendingString:@".modelsArray"];
     return comment;
 }
 
@@ -88,7 +124,8 @@ static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
     DKMediaSaveHit(DKMediaSaveEntryStickerCell);
     UICollectionViewCell *cell = (UICollectionViewCell *)self;
     NSString *modelSource = @"unresolved";
-    id comment = DKCommentForCell(cell, &modelSource);
+    UIViewController *modelController = nil;
+    id comment = DKCommentForCell(cell, &modelSource, &modelController);
     NSDictionary *resolvedComment = comment ? DKResolveComment(comment) : nil;
     DKMediaSaveItem *item = resolvedComment ? DKSelectCommentSticker(resolvedComment) : nil;
     NSArray *stickerURLs = resolvedComment[@"sticker"][@"animate"][@"urls"]
@@ -99,8 +136,9 @@ static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
         if (DKMediaValue(comment, key)) [modelFields addObject:key];
         if (DKMediaValue(content, key)) [modelFields addObject:[@"content." stringByAppendingString:key]];
     }
-    DKMediaSaveNote([NSString stringWithFormat:@"评论表情入口 source=%@ model=%@ fields=%@ stickerURLs=%lu item=%@",
+    DKMediaSaveNote([NSString stringWithFormat:@"评论表情入口 source=%@ controller=%@ model=%@ fields=%@ stickerURLs=%lu item=%@",
                      modelSource,
+                     modelController ? NSStringFromClass([modelController class]) : @"nil",
                      comment ? NSStringFromClass([comment class]) : @"nil",
                      modelFields.count ? [modelFields componentsJoinedByString:@","] : @"none",
                      (unsigned long)[stickerURLs count],
@@ -111,12 +149,16 @@ static id DKCommentForCell(UICollectionViewCell *cell, NSString **modelSource) {
             if ([view isKindOfClass:UICollectionView.class]) { list = (UICollectionView *)view; break; }
         }
         NSIndexPath *path = [list indexPathForCell:cell];
-        UIViewController *controller = DKMediaControllerForResponder(self, kDKCommentListController);
-        DKMediaSaveNote([NSString stringWithFormat:@"评论表情上下文 cell=%@ list=%@ controller=%@ index=%@",
+        id dataSource = list.dataSource;
+        id delegate = list.delegate;
+        DKMediaSaveNote([NSString stringWithFormat:@"评论表情上下文 cell=%@ list=%@ controller=%@ dataSource=%@ delegate=%@ index=%@ responders=%@",
                          NSStringFromClass([self class]),
                          list ? NSStringFromClass([list class]) : @"nil",
-                         controller ? NSStringFromClass([controller class]) : @"nil",
-                         path ? [NSString stringWithFormat:@"%ld/%ld", (long)path.section, (long)path.item] : @"nil"]);
+                         modelController ? NSStringFromClass([modelController class]) : @"nil",
+                         dataSource ? NSStringFromClass([dataSource class]) : @"nil",
+                         delegate ? NSStringFromClass([delegate class]) : @"nil",
+                         path ? [NSString stringWithFormat:@"%ld/%ld", (long)path.section, (long)path.item] : @"nil",
+                         DKResponderClassPath(cell)]);
     }
     DKMediaSaveRun(item ? @[item] : @[], @"评论表情长按");
 }
