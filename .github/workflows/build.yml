@@ -37,6 +37,9 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Test comment sticker resolution across feed and search models
+        run: bash .github/scripts/test-comment-sticker-resolution.sh
+
       - name: Resolve Theos cache key
         run: |
           theos_head=$(git ls-remote https://github.com/roothide/theos HEAD | cut -f 1)

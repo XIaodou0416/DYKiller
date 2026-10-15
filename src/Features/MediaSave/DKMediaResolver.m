@@ -82,6 +82,22 @@ NSDictionary *DKResolveAweme(id aweme) {
     return dict;
 }
 
+static id DKCommentStickerModel(id comment) {
+    NSArray<NSString *> *keys = @[@"sticker", @"stickerModel", @"commentSticker", @"commentStickerModel"];
+    for (NSString *key in keys) {
+        id model = DKMediaValue(comment, key);
+        if (model) return model;
+    }
+    for (NSString *key in @[@"content", @"commentContent"]) {
+        id content = DKMediaValue(comment, key);
+        for (NSString *stickerKey in keys) {
+            id model = DKMediaValue(content, stickerKey);
+            if (model) return model;
+        }
+    }
+    return nil;
+}
+
 NSDictionary *DKResolveComment(id comment) {
     if (!comment) return @{};
     NSMutableArray *images = [NSMutableArray array];
@@ -104,14 +120,21 @@ NSDictionary *DKResolveComment(id comment) {
     id replyVideo = DKMediaValue(comment, @"replyVideoModel");
     if (replyVideo && !videos.count) [videos addObject:DKResolveAweme(replyVideo)];
     NSMutableDictionary *dict = [@{@"images": images, @"videos": videos} mutableCopy];
-    id sticker = DKMediaValue(comment, @"sticker");
+    id sticker = DKCommentStickerModel(comment);
     if (sticker) {
         NSMutableDictionary *s = [NSMutableDictionary dictionary];
         NSDictionary *animate = DKURLModel(DKMediaValue(sticker, @"animateURLModel"));
         NSDictionary *still = DKURLModel(DKMediaValue(sticker, @"staticURLModel"));
         if (animate) s[@"animate"] = animate;
         if (still) s[@"static"] = still;
+        if (!s.count) {
+            NSArray<NSArray *> *groups = DKResolveStickerURLGroups(sticker);
+            if (groups.count) s[@"animate"] = @{ @"urls": groups.firstObject };
+        }
         if (s.count) dict[@"sticker"] = s;
+    } else {
+        NSArray<NSArray *> *groups = DKResolveStickerURLGroups(comment);
+        if (groups.count) dict[@"sticker"] = @{ @"animate": @{ @"urls": groups.firstObject } };
     }
     return dict;
 }
@@ -133,7 +156,8 @@ static void DKCollectStickerURLs(id model, NSMutableArray *animated, NSMutableAr
     }
     for (NSString *key in @[@"staticURL", @"static_url", @"displayIconURL"]) DKAppendString(still, DKMediaValue(model, key));
     DKAppendGroup(still, DKStrings(DKMediaValue(DKMediaValue(model, @"staticURLModel"), @"originURLList")));
-    for (NSString *key in @[@"emoticonModel", @"giphyMessage"]) {
+    for (NSString *key in @[@"emoticonModel", @"giphyMessage", @"sticker", @"stickerModel",
+                            @"commentSticker", @"commentStickerModel", @"content", @"commentContent"]) {
         DKCollectStickerURLs(DKMediaValue(model, key), animated, still, visited);
     }
 }
